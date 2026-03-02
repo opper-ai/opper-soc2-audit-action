@@ -1,5 +1,5 @@
 import { spawnSync } from "child_process";
-import { readdirSync, readFileSync, existsSync } from "node:fs";
+import { readdirSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createFunctionTool } from "@opperai/agents";
@@ -223,5 +223,32 @@ export function createTools(owner: string, repo: string, localPath: string) {
     },
   );
 
-  return { listRepoFiles, readFile, searchCode, getRepoSettings, listWorkflows, listDependencies };
+  const searchAndReplace = createFunctionTool(
+    ({ path, old_string, new_string }: { owner: string; repo: string; path: string; old_string: string; new_string: string }) => {
+      const filepath = join(localPath, path);
+      if (!existsSync(filepath)) return `ERROR: file not found: ${path}`;
+      try {
+        const content = readFileSync(filepath, "utf-8");
+        if (!content.includes(old_string)) return `ERROR: old_string not found in ${path}`;
+        const updated = content.replace(old_string, new_string);
+        writeFileSync(filepath, updated, "utf-8");
+        return "OK";
+      } catch (e) {
+        return `ERROR: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+    {
+      name: "search_and_replace",
+      description: "Replace an exact string in a file. Use this to apply targeted fixes. Returns 'OK' on success or an error message.",
+      schema: z.object({
+        owner: z.string().describe("Repository owner"),
+        repo: z.string().describe("Repository name"),
+        path: z.string().describe("File path within the repository"),
+        old_string: z.string().describe("Exact string to find and replace (must be unique in the file)"),
+        new_string: z.string().describe("Replacement string"),
+      }),
+    },
+  );
+
+  return { listRepoFiles, readFile, searchCode, getRepoSettings, listWorkflows, listDependencies, searchAndReplace };
 }
