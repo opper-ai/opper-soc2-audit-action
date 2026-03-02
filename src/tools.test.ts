@@ -48,6 +48,18 @@ test("searchAndReplace returns error if old_string not found", async () => {
   assert_strict.ok(result.startsWith("ERROR:"));
 });
 
+test("searchAndReplace returns error if old_string appears multiple times", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "soc2-test-"));
+  writeFileSync(join(dir, "config.ts"), 'const x = "foo"; const y = "foo";\n');
+  const tools = createTools("owner", "repo", dir);
+  const toolResult = await (tools.searchAndReplace as any).execute({
+    owner: "owner", repo: "repo",
+    path: "config.ts", old_string: '"foo"', new_string: '"bar"',
+  });
+  const result = toolResult.output;
+  assert_strict.ok(result.startsWith("ERROR:"));
+});
+
 test("searchAndReplace returns error if file not found", async () => {
   const dir = mkdtempSync(join(tmpdir(), "soc2-test-"));
   const tools = createTools("owner", "repo", dir);

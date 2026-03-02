@@ -226,10 +226,13 @@ export function createTools(owner: string, repo: string, localPath: string) {
   const searchAndReplace = createFunctionTool(
     ({ path, old_string, new_string }: { owner: string; repo: string; path: string; old_string: string; new_string: string }) => {
       const filepath = join(localPath, path);
+      if (!filepath.startsWith(localPath + "/")) return `ERROR: path escapes repository root: ${path}`;
       if (!existsSync(filepath)) return `ERROR: file not found: ${path}`;
       try {
         const content = readFileSync(filepath, "utf-8");
-        if (!content.includes(old_string)) return `ERROR: old_string not found in ${path}`;
+        const count = content.split(old_string).length - 1;
+        if (count === 0) return `ERROR: old_string not found in ${path}`;
+        if (count > 1) return `ERROR: old_string is not unique in ${path} (${count} occurrences found)`;
         const updated = content.replace(old_string, new_string);
         writeFileSync(filepath, updated, "utf-8");
         return "OK";
@@ -244,7 +247,7 @@ export function createTools(owner: string, repo: string, localPath: string) {
         owner: z.string().describe("Repository owner"),
         repo: z.string().describe("Repository name"),
         path: z.string().describe("File path within the repository"),
-        old_string: z.string().describe("Exact string to find and replace (must be unique in the file)"),
+        old_string: z.string().describe("Exact string to find and replace. Must appear exactly once in the file."),
         new_string: z.string().describe("Replacement string"),
       }),
     },
