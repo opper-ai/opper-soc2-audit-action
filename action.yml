@@ -25,6 +25,14 @@ inputs:
     description: "Whether to upload the report as a workflow artifact"
     required: false
     default: "true"
+  create-issues:
+    description: "Create or update GitHub Issues for critical and high findings"
+    required: false
+    default: "false"
+  auto-fix:
+    description: "Attempt to fix findings using an Opper agent and open PRs (implies create-issues)"
+    required: false
+    default: "false"
 
 outputs:
   report-path:
@@ -103,6 +111,8 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         MODEL: ${{ inputs.model }}
         VALIDATED_REPOS: ${{ steps.validate.outputs.validated-repos }}
+        CREATE_ISSUES: ${{ inputs.create-issues == 'true' || inputs.auto-fix == 'true' }}
+        AUTO_FIX: ${{ inputs.auto-fix }}
       working-directory: ${{ github.action_path }}
       run: |
         npx tsx src/main.ts
