@@ -1,7 +1,7 @@
 import { appendFileSync, writeFileSync } from "fs";
 import { join } from "node:path";
 import { parseRepoArg, cloneRepo } from "./tools.ts";
-import { runAudit, type AuditMode } from "./coordinator.ts";
+import { runAudit } from "./coordinator.ts";
 import { generateReport } from "./report.ts";
 import { computeStats, formatStats } from "./stats.ts";
 import type { AgentFindings } from "./schemas.ts";
@@ -20,8 +20,7 @@ async function main() {
   }
 
   const [owner, repo] = parseRepoArg(repoArg);
-  const auditMode = (process.env.AUDIT_MODE === "full-context" ? "full-context" : "agent") as AuditMode;
-  const allFindings = await runAudit(owner, repo, auditMode);
+  const allFindings = await runAudit(owner, repo);
 
   const repoName = `${owner}/${repo}`;
   const stats = computeStats(repoName, allFindings);

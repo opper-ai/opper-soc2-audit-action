@@ -29,10 +29,6 @@ inputs:
     description: "Attempt to fix findings using an Opper agent and open PRs (implies create-issues)"
     required: false
     default: "false"
-  audit-mode:
-    description: "Audit mode: 'agent' (iterative tool use) or 'full-context' (load entire repo into context window)"
-    required: false
-    default: "agent"
 
 outputs:
   report-path:
@@ -88,7 +84,6 @@ runs:
         VALIDATED_REPO: ${{ github.repository }}
         CREATE_ISSUES: ${{ inputs.create-issues == 'true' || inputs.auto-fix == 'true' }}
         AUTO_FIX: ${{ inputs.auto-fix }}
-        AUDIT_MODE: ${{ inputs.audit-mode }}
       working-directory: ${{ github.action_path }}
       run: |
         npx tsx src/main.ts
