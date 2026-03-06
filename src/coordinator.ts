@@ -9,79 +9,55 @@ import {
   createConfidentialityAgent,
   createPrivacyAgent,
 } from "./agents.ts";
-import {
-  createSecurityAnalyzer,
-  createAvailabilityAnalyzer,
-  createProcessingIntegrityAnalyzer,
-  createConfidentialityAnalyzer,
-  createPrivacyAnalyzer,
-} from "./analyzers.ts";
 import { loadRepoContext, formatContext } from "./context.ts";
 
 export type AuditMode = "agent" | "full-context";
 
-type AgentFactory = (owner: string, repo: string, localPath: string) => Agent<string, AgentFindings>;
-type AnalyzerFactory = () => Agent<string, AgentFindings>;
+interface AgentDef {
+  factory: (opts: { owner: string; repo: string; localPath: string; repoContext?: string }) => Agent<string, AgentFindings>;
+  name: string;
+}
 
-async function runAgent(
-  factory: AgentFactory,
-  name: string,
+const AGENTS: AgentDef[] = [
+  { factory: createSecurityAgent, name: "Security" },
+  { factory: createAvailabilityAgent, name: "Availability" },
+  { factory: createProcessingIntegrityAgent, name: "Processing Integrity" },
+  { factory: createConfidentialityAgent, name: "Confidentiality" },
+  { factory: createPrivacyAgent, name: "Privacy" },
+];
+
+async function runOne(
+  def: AgentDef,
   owner: string,
   repo: string,
   localPath: string,
   parentSpanId: string,
+  repoContext?: string,
 ): Promise<AgentFindings> {
-  console.log(`  [${owner}/${repo}] Starting ${name} audit (agent mode)...`);
-  const agent = factory(owner, repo, localPath);
+  const mode = repoContext ? "full-context" : "agent";
+  console.log(`  [${owner}/${repo}] Starting ${def.name} audit (${mode})...`);
+
+  const agent = def.factory({ owner, repo, localPath, repoContext });
 
   agent.registerHook(HookEvents.BeforeTool, ({ tool, input }: { tool: { name: string }; input?: unknown }) => {
-    console.log(`  [${owner}/${repo}/${name}] ${tool.name}`, JSON.stringify(input ?? {}).slice(0, 100));
+    console.log(`  [${owner}/${repo}/${def.name}] ${tool.name}`, JSON.stringify(input ?? {}).slice(0, 100));
   });
 
+  const prompt = repoContext
+    ? `Audit the GitHub repository ${owner}/${repo} for SOC2 ${def.name} compliance.\n\n# Repository Contents\n\n${repoContext}`
+    : `Audit the GitHub repository ${owner}/${repo} for SOC2 ${def.name} compliance. Use owner="${owner}" and repo="${repo}" when calling tools.`;
+
   try {
-    const { result } = await agent.run(
-      `Audit the GitHub repository ${owner}/${repo} for SOC2 ${name} compliance. Use owner="${owner}" and repo="${repo}" when calling tools.`,
-      parentSpanId,
-    );
-    console.log(`  [${owner}/${repo}] ${name}: ${result.findings.length} findings`);
+    const { result } = await agent.run(prompt, parentSpanId);
+    console.log(`  [${owner}/${repo}] ${def.name}: ${result.findings.length} findings`);
     return result;
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error(`  [${owner}/${repo}] ${name} agent error: ${msg}`);
+    console.error(`  [${owner}/${repo}] ${def.name} error: ${msg}`);
     return {
-      criteria: name,
+      criteria: def.name,
       control_reference: "N/A",
-      summary: `Agent error: ${msg.slice(0, 200)}`,
-      findings: [],
-    };
-  }
-}
-
-async function runAnalyzer(
-  factory: AnalyzerFactory,
-  name: string,
-  owner: string,
-  repo: string,
-  context: string,
-  parentSpanId: string,
-): Promise<AgentFindings> {
-  console.log(`  [${owner}/${repo}] Starting ${name} audit (full-context mode)...`);
-  const analyzer = factory();
-
-  try {
-    const { result } = await analyzer.run(
-      `Audit the GitHub repository ${owner}/${repo} for SOC2 ${name} compliance.\n\n${context}`,
-      parentSpanId,
-    );
-    console.log(`  [${owner}/${repo}] ${name}: ${result.findings.length} findings`);
-    return result;
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.error(`  [${owner}/${repo}] ${name} analyzer error: ${msg}`);
-    return {
-      criteria: name,
-      control_reference: "N/A",
-      summary: `Analyzer error: ${msg.slice(0, 200)}`,
+      summary: `Error: ${msg.slice(0, 200)}`,
       findings: [],
     };
   }
@@ -93,42 +69,19 @@ export async function runAudit(owner: string, repo: string, mode: AuditMode = "a
   const client = createOpperClient(process.env.OPPER_API_KEY);
   const span = await client.createSpan({ name: `soc2-audit/${owner}/${repo}` });
 
-  let results: AgentFindings[];
-
+  let repoContext: string | undefined;
   if (mode === "full-context") {
     console.log(`\nLoading full repository context for ${owner}/${repo}...`);
     const ctx = loadRepoContext(owner, repo, localPath);
-    const context = formatContext(ctx);
+    repoContext = formatContext(ctx);
     console.log(`  Context: ${ctx.files.length} files, ${Math.round(ctx.totalSize / 1024)}KB${ctx.truncated ? " (truncated)" : ""}`);
-
-    const analyzers = [
-      { factory: createSecurityAnalyzer, name: "Security" },
-      { factory: createAvailabilityAnalyzer, name: "Availability" },
-      { factory: createProcessingIntegrityAnalyzer, name: "Processing Integrity" },
-      { factory: createConfidentialityAnalyzer, name: "Confidentiality" },
-      { factory: createPrivacyAnalyzer, name: "Privacy" },
-    ];
-
-    console.log(`Auditing ${owner}/${repo} — running ${analyzers.length} analyzers in parallel (full-context)...`);
-
-    results = await Promise.all(
-      analyzers.map(({ factory, name }) => runAnalyzer(factory, name, owner, repo, context, span.id)),
-    );
-  } else {
-    const agents = [
-      { factory: createSecurityAgent, name: "Security" },
-      { factory: createAvailabilityAgent, name: "Availability" },
-      { factory: createProcessingIntegrityAgent, name: "Processing Integrity" },
-      { factory: createConfidentialityAgent, name: "Confidentiality" },
-      { factory: createPrivacyAgent, name: "Privacy" },
-    ];
-
-    console.log(`\nAuditing ${owner}/${repo} (${localPath}) — running ${agents.length} agents in parallel...`);
-
-    results = await Promise.all(
-      agents.map(({ factory, name }) => runAgent(factory, name, owner, repo, localPath, span.id)),
-    );
   }
+
+  console.log(`\nAuditing ${owner}/${repo} — running ${AGENTS.length} agents in parallel (${mode})...`);
+
+  const results = await Promise.all(
+    AGENTS.map((def) => runOne(def, owner, repo, localPath, span.id, repoContext)),
+  );
 
   await client.updateSpan(span.id, { repo: `${owner}/${repo}`, mode, findings: results.flatMap((r) => r.findings).length });
 
