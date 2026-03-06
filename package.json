@@ -1,9 +1,11 @@
 {
   "name": "opper-soc2-audit",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "SOC2 compliance checker agent for GitHub repositories",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "tsx src/main.ts",
     "test": "tsx --test src/**/*.test.ts",
