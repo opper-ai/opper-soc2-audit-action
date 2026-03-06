@@ -4,11 +4,6 @@ on:
   schedule:
     - cron: "0 7 * * 1"  # Every Monday at 07:00 UTC
   workflow_dispatch:
-    inputs:
-      additional_repos:
-        description: "Extra repos to audit (comma-separated, e.g. org/repo1,org/repo2)"
-        required: false
-        default: ""
 
 permissions:
   contents: read
@@ -41,5 +36,4 @@ jobs:
         id: audit
         uses: ./
         with:
-          repos: "${{ github.repository }}${{ inputs.additional_repos != '' && format(',{0}', inputs.additional_repos) || '' }}"
           opper-api-key: ${{ secrets.OPPER_API_KEY }}

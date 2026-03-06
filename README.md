@@ -48,10 +48,11 @@ jobs:
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `opper-api-key` | Yes | — | Opper API key for the LLM agents |
-| `repos` | No | Current repo | Repos to audit, comma-separated (`org/repo1,org/repo2`) |
-| `github-token` | No | `github.token` | GitHub token with read access to target repos |
+| `github-token` | No | `github.token` | GitHub token with read access to the repo |
 | `model` | No | `gcp/claude-sonnet-4.5-eu` | Opper model identifier for the agents |
 | `upload-artifact` | No | `true` | Upload the report as a workflow artifact |
+| `create-issues` | No | `false` | Create/update GitHub Issues for critical and high findings |
+| `auto-fix` | No | `false` | Attempt code fixes via Opper agent and open PRs (implies `create-issues`) |
 
 ## Outputs
 
@@ -64,19 +65,9 @@ jobs:
 | `medium` | Number of medium-severity findings |
 | `low` | Number of low-severity findings |
 | `risk-level` | Overall risk level (`Critical`, `High`, `Medium`, `Low`) |
-| `repos-audited` | Number of repositories audited |
 | `categories-checked` | Number of SOC2 categories checked |
 
 ## Examples
-
-### Audit multiple repos
-
-```yaml
-- uses: opper-ai/opper-soc2-audit-action@main
-  with:
-    opper-api-key: ${{ secrets.OPPER_API_KEY }}
-    repos: "my-org/api,my-org/frontend,my-org/infra"
-```
 
 ### Fail the workflow on critical findings
 
@@ -90,6 +81,21 @@ jobs:
   run: |
     echo "::error::${{ steps.audit.outputs.critical }} critical findings detected"
     exit 1
+```
+
+### Auto-create issues and fix PRs
+
+```yaml
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+steps:
+  - uses: opper-ai/opper-soc2-audit-action@main
+    with:
+      opper-api-key: ${{ secrets.OPPER_API_KEY }}
+      auto-fix: "true"
 ```
 
 ### Use a different model
@@ -127,12 +133,6 @@ Override the model:
 ```bash
 MODEL="anthropic/claude-sonnet-4" npx tsx src/main.ts owner/repo
 ```
-
-## GitHub API rate limits
-
-Each audit run makes multiple `gh api` calls per agent (5 agents × up to ~10 calls each). For a single repo this is well within GitHub's rate limit of 5,000 requests/hour for authenticated users.
-
-For **multi-repo audits** all repos are audited in parallel, so rate limit consumption scales with repo count. If you hit rate limits, audit repos one at a time or use a GitHub App token with a higher limit.
 
 ## Report
 

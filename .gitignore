@@ -3,3 +3,4 @@ node_modules/
 dist/
 soc2-report-*.md
 *.tsbuildinfo
+docs/plans/

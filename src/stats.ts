@@ -1,16 +1,14 @@
 import type { AgentFindings, Severity } from "./schemas.ts";
 
 export interface AuditStats {
-  reposAudited: number;
   categoriesChecked: number;
   totalFindings: number;
   severityCounts: Record<Severity, number>;
   riskLevel: string;
   categoryBreakdown: { category: string; count: number }[];
-  repoBreakdown: { repo: string; count: number }[];
 }
 
-export function computeStats(repos: string[], allFindings: AgentFindings[]): AuditStats {
+export function computeStats(repo: string, allFindings: AgentFindings[]): AuditStats {
   const severityCounts: Record<Severity, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
 
   for (const af of allFindings) {
@@ -36,25 +34,12 @@ export function computeStats(repos: string[], allFindings: AgentFindings[]): Aud
     .map(([category, count]) => ({ category, count }))
     .sort((a, b) => b.count - a.count);
 
-  const repoCounts = new Map<string, number>();
-  for (const af of allFindings) {
-    const repo = af.repo ?? repos[0];
-    const existing = repoCounts.get(repo) ?? 0;
-    repoCounts.set(repo, existing + af.findings.length);
-  }
-
-  const repoBreakdown = [...repoCounts.entries()]
-    .map(([repo, count]) => ({ repo, count }))
-    .sort((a, b) => b.count - a.count);
-
   return {
-    reposAudited: repos.length,
     categoriesChecked: categoryCounts.size,
     totalFindings,
     severityCounts,
     riskLevel,
     categoryBreakdown,
-    repoBreakdown,
   };
 }
 
@@ -66,7 +51,6 @@ export function formatStats(stats: AuditStats): string {
     "",
     `| Metric | Value |`,
     `|--------|-------|`,
-    `| Repos audited | ${stats.reposAudited} |`,
     `| Categories checked | ${stats.categoriesChecked} |`,
     `| Total findings | ${stats.totalFindings} |`,
     `| Risk level | **${stats.riskLevel}** |`,
@@ -92,17 +76,6 @@ export function formatStats(stats: AuditStats): string {
     lines.push("|----------|----------|");
     for (const { category, count } of stats.categoryBreakdown) {
       lines.push(`| ${category} | ${count} |`);
-    }
-  }
-
-  if (stats.repoBreakdown.length > 1) {
-    lines.push("");
-    lines.push("### Findings by Repository");
-    lines.push("");
-    lines.push("| Repository | Findings |");
-    lines.push("|------------|----------|");
-    for (const { repo, count } of stats.repoBreakdown) {
-      lines.push(`| ${repo} | ${count} |`);
     }
   }
 

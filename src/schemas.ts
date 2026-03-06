@@ -19,6 +19,5 @@ export const AgentFindingsSchema = z.object({
   control_reference: z.string().describe("SOC2 control reference (e.g., 'CC6/CC7')"),
   summary: z.string().describe("Brief summary of the audit"),
   findings: z.array(FindingSchema).describe("List of findings"),
-  repo: z.string().optional().describe("Repository audited (owner/repo format)"),
 });
 export type AgentFindings = z.infer<typeof AgentFindingsSchema>;

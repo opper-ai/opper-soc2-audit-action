@@ -8,17 +8,14 @@ function mdCell(s: string): string {
   return s.replace(/\|/g, "\\|").replace(/\n|\r/g, " ");
 }
 
-export function generateReport(repos: string[], allFindings: AgentFindings[], stats?: AuditStats): string {
-  const { riskLevel, totalFindings } = stats ?? computeStats(repos, allFindings);
+export function generateReport(repo: string, allFindings: AgentFindings[], stats?: AuditStats): string {
+  const { riskLevel, totalFindings } = stats ?? computeStats(repo, allFindings);
   const today = new Date().toISOString().split("T")[0];
-  const multiRepo = repos.length > 1;
 
   const lines: string[] = [
     `# SOC2 Compliance Report`,
     ``,
-    multiRepo
-      ? `**Repositories:** ${repos.join(", ")}`
-      : `**Repository:** ${repos[0]}`,
+    `**Repository:** ${repo}`,
     `**Date:** ${today}`,
     `**Overall Risk Level:** ${riskLevel}`,
     `**Total Findings:** ${totalFindings}`,
@@ -27,52 +24,23 @@ export function generateReport(repos: string[], allFindings: AgentFindings[], st
     ``,
   ];
 
-  if (multiRepo) {
-    for (const repoName of repos) {
-      const repoFindings = allFindings.filter((af) => af.repo === repoName);
-      const count = repoFindings.reduce((sum, af) => sum + af.findings.length, 0);
-      lines.push(`### ${repoName} (${count} findings)`);
-      for (const af of repoFindings) {
-        lines.push(`- **${mdCell(af.criteria)}** (${mdCell(af.control_reference)}): ${mdCell(af.summary)} (${af.findings.length} findings)`);
-      }
-      lines.push("");
-    }
-  } else {
-    for (const af of allFindings) {
-      lines.push(`- **${mdCell(af.criteria)}** (${mdCell(af.control_reference)}): ${mdCell(af.summary)} (${af.findings.length} findings)`);
-    }
-    lines.push("");
+  for (const af of allFindings) {
+    lines.push(`- **${mdCell(af.criteria)}** (${mdCell(af.control_reference)}): ${mdCell(af.summary)} (${af.findings.length} findings)`);
   }
+  lines.push("");
 
   lines.push("## Findings by Trust Service Criteria");
   lines.push("");
-
-  if (multiRepo) {
-    for (const repoName of repos) {
-      lines.push(`### ${repoName}`);
-      lines.push("");
-      const repoFindings = allFindings.filter((af) => af.repo === repoName);
-      renderFindings(lines, repoFindings, 4);
-    }
-  } else {
-    renderFindings(lines, allFindings, 3);
-  }
+  renderFindings(lines, allFindings, 3);
 
   lines.push("## Summary");
   lines.push("");
-  lines.push(multiRepo
-    ? "| Repository | Criteria | Critical | High | Medium | Low | Info |"
-    : "| Criteria | Critical | High | Medium | Low | Info |");
-  lines.push(multiRepo
-    ? "|------------|----------|----------|------|--------|-----|------|"
-    : "|----------|----------|------|--------|-----|------|");
+  lines.push("| Criteria | Critical | High | Medium | Low | Info |");
+  lines.push("|----------|----------|------|--------|-----|------|");
   for (const af of allFindings) {
     const c: Record<Severity, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
     for (const f of af.findings) c[f.severity]++;
-    const row = `${mdCell(af.criteria)} | ${c.critical} | ${c.high} | ${c.medium} | ${c.low} | ${c.info}`;
-    lines.push(multiRepo
-      ? `| ${af.repo} | ${row} |`
-      : `| ${row} |`);
+    lines.push(`| ${mdCell(af.criteria)} | ${c.critical} | ${c.high} | ${c.medium} | ${c.low} | ${c.info} |`);
   }
   lines.push("");
 
