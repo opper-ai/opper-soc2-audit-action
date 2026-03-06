@@ -32,7 +32,6 @@ async function runAgent(
       `Audit the GitHub repository ${owner}/${repo} for SOC2 ${name} compliance. Use owner="${owner}" and repo="${repo}" when calling tools.`,
       parentSpanId,
     );
-    result.repo = `${owner}/${repo}`;
     console.log(`  [${owner}/${repo}] ${name}: ${result.findings.length} findings`);
     return result;
   } catch (e: unknown) {
@@ -43,7 +42,6 @@ async function runAgent(
       control_reference: "N/A",
       summary: `Agent error: ${msg.slice(0, 200)}`,
       findings: [],
-      repo: `${owner}/${repo}`,
     };
   }
 }
@@ -68,7 +66,7 @@ export async function runAudit(owner: string, repo: string): Promise<AgentFindin
     agents.map(({ factory, name }) => runAgent(factory, name, owner, repo, localPath, span.id)),
   );
 
-  await client.updateSpan(span.id, { repos: [`${owner}/${repo}`], findings: results.flatMap((r) => r.findings).length });
+  await client.updateSpan(span.id, { repo: `${owner}/${repo}`, findings: results.flatMap((r) => r.findings).length });
 
   return results;
 }

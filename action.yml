@@ -1,20 +1,16 @@
 name: "SOC2 Compliance Audit"
-description: "Run a SOC2 compliance audit on GitHub repositories using AI agents. Checks branch protection, CI/CD, secrets management, access controls, and more."
+description: "Run a SOC2 compliance audit on the current GitHub repository using AI agents. Checks branch protection, CI/CD, secrets management, access controls, and more."
 
 branding:
   icon: shield
   color: blue
 
 inputs:
-  repos:
-    description: "Repos to audit (comma-separated, e.g. org/repo1,org/repo2). Defaults to the calling repo."
-    required: false
-    default: ""
   opper-api-key:
     description: "Opper API key for the LLM agents"
     required: true
   github-token:
-    description: "GitHub token for API access. Needs read access to repos being audited."
+    description: "GitHub token for API access. Needs read access to the repo being audited."
     required: false
     default: ${{ github.token }}
   model:
@@ -56,9 +52,6 @@ outputs:
   risk-level:
     description: "Overall risk level (Critical, High, Medium, Low)"
     value: ${{ steps.audit.outputs.risk-level }}
-  repos-audited:
-    description: "Number of repositories audited"
-    value: ${{ steps.audit.outputs.repos-audited }}
   categories-checked:
     description: "Number of SOC2 categories checked"
     value: ${{ steps.audit.outputs.categories-checked }}
@@ -81,28 +74,6 @@ runs:
       run: npm ci
       working-directory: ${{ github.action_path }}
 
-    - name: Validate inputs
-      shell: bash
-      env:
-        INPUT_REPOS: ${{ inputs.repos }}
-      run: |
-        REPOS="${INPUT_REPOS}"
-        if [ -z "$REPOS" ]; then
-          REPOS="${{ github.repository }}"
-        fi
-
-        # Validate each repo matches owner/name format
-        IFS=',' read -ra REPO_LIST <<< "$REPOS"
-        for repo in "${REPO_LIST[@]}"; do
-          repo=$(echo "$repo" | xargs)  # trim whitespace
-          if [[ ! "$repo" =~ ^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$ ]]; then
-            echo "::error::Invalid repo format: '$repo'. Expected 'owner/repo'."
-            exit 1
-          fi
-        done
-        echo "validated-repos=$REPOS" >> "$GITHUB_OUTPUT"
-      id: validate
-
     - name: Run SOC2 audit
       id: audit
       shell: bash
@@ -110,7 +81,7 @@ runs:
         OPPER_API_KEY: ${{ inputs.opper-api-key }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
         MODEL: ${{ inputs.model }}
-        VALIDATED_REPOS: ${{ steps.validate.outputs.validated-repos }}
+        VALIDATED_REPO: ${{ github.repository }}
         CREATE_ISSUES: ${{ inputs.create-issues == 'true' || inputs.auto-fix == 'true' }}
         AUTO_FIX: ${{ inputs.auto-fix }}
       working-directory: ${{ github.action_path }}
