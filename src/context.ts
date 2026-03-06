@@ -18,7 +18,7 @@ const SKIP_EXTENSIONS = new Set([
   ".map",
 ]);
 
-const MAX_CHUNK_SIZE = 800_000; // ~800KB per chunk (~200k tokens)
+const MAX_CHUNK_SIZE = 2_000_000; // ~2MB per chunk — use a large context model (e.g. Gemini 1M+)
 
 export interface RepoFile {
   path: string;

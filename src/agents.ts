@@ -15,6 +15,8 @@ function loadSOC2Reference(filename: string): string {
 const model = process.env.MODEL;
 if (!model) throw new Error("MODEL environment variable is not set. Set MODEL to an Opper model identifier (e.g. gcp/claude-sonnet-4.5-eu).");
 
+const contextModel = process.env.CONTEXT_MODEL || model;
+
 const CONTEXT_METHODOLOGY = `
 ## Methodology
 
@@ -142,7 +144,7 @@ ${CONTEXT_METHODOLOGY}
 Return findings with severity levels and actionable recommendations.`,
       tools: [],
       outputSchema: AgentFindingsSchema,
-      model,
+      model: contextModel,
       maxIterations: 1,
     });
   }

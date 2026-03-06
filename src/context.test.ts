@@ -43,8 +43,9 @@ describe("loadRepoChunks", () => {
     const dir = mkdtempSync(join(tmpdir(), "soc2-ctx-split-"));
     mkdirSync(join(dir, "a"));
     mkdirSync(join(dir, "b"));
-    writeFileSync(join(dir, "a", "big1.txt"), "x".repeat(500_000));
-    writeFileSync(join(dir, "b", "big2.txt"), "y".repeat(500_000));
+    // 1.5MB each, total 3MB > 2MB chunk limit
+    writeFileSync(join(dir, "a", "big1.txt"), "x".repeat(1_500_000));
+    writeFileSync(join(dir, "b", "big2.txt"), "y".repeat(1_500_000));
 
     const chunks = loadRepoChunks(dir);
     assert.ok(chunks.length >= 2, `expected >= 2 chunks, got ${chunks.length}`);
@@ -58,9 +59,9 @@ describe("loadRepoChunks", () => {
     const dir = mkdtempSync(join(tmpdir(), "soc2-ctx-dirs-"));
     mkdirSync(join(dir, "alpha"));
     mkdirSync(join(dir, "beta"));
-    writeFileSync(join(dir, "alpha", "one.ts"), "a".repeat(500_000));
+    writeFileSync(join(dir, "alpha", "one.ts"), "a".repeat(1_500_000));
     writeFileSync(join(dir, "alpha", "small.ts"), "small file");
-    writeFileSync(join(dir, "beta", "two.ts"), "b".repeat(500_000));
+    writeFileSync(join(dir, "beta", "two.ts"), "b".repeat(1_500_000));
 
     const chunks = loadRepoChunks(dir);
     // alpha files should be in the same chunk
