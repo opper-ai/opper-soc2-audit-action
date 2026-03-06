@@ -1,0 +1,26 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          release-type: node
+
+      # Move the floating v1 tag on new release
+      - if: steps.release.outputs.release_created
+        uses: actions/checkout@v4
+      - if: steps.release.outputs.release_created
+        run: |
+          git tag -f v1 ${{ steps.release.outputs.tag_name }}
+          git push -f origin v1
