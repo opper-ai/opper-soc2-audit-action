@@ -18,14 +18,10 @@ if (!model) throw new Error("MODEL environment variable is not set. Set MODEL to
 const CONTEXT_METHODOLOGY = `
 ## Methodology
 
-You have been given the full repository contents above. Analyze what you can see directly.
-Use tools only when you need to:
-- Check GitHub API settings (branch protection, repo visibility) via get_repo_settings
-- Search for specific patterns you want to verify via search_code
-- Read files that were too large to include in the context via read_file
-
-Do NOT use tools to re-read files already provided in the context — that wastes time.
-Only report findings you can confirm from the code or API data.`;
+You have been given the full repository contents above. Focus exclusively on analyzing the code provided.
+Do NOT use any tools — everything you need is in the context.
+Base your findings only on what you can see in the source code.
+Only report findings you can directly confirm from the provided code.`;
 
 const AGENT_METHODOLOGY = `
 ## Research methodology
@@ -47,22 +43,17 @@ interface AgentOptions {
   repoContext?: string;
 }
 
-function methodology(hasContext: boolean): string {
-  return hasContext ? CONTEXT_METHODOLOGY : AGENT_METHODOLOGY;
+interface AgentConfig {
+  name: string;
+  checklist: string;
+  soc2File: string;
+  toolKeys: (keyof ReturnType<typeof createTools>)[];
 }
 
-function maxIter(hasContext: boolean): number {
-  return hasContext ? 10 : 30;
-}
-
-export function createSecurityAgent({ owner, repo, localPath, repoContext }: AgentOptions) {
-  const { listRepoFiles, readFile, searchCode, getRepoSettings, listWorkflows, listDependencies } = createTools(owner, repo, localPath);
-  const hasContext = !!repoContext;
-  return new Agent<string, AgentFindings>({
-    name: "SecurityAgent",
-    instructions: `You are a SOC2 Security auditor (Common Criteria CC1-CC9). Audit the GitHub repository for security compliance.
-
-Check for:
+const AGENT_CONFIGS: AgentConfig[] = [
+  {
+    name: "Security",
+    checklist: `Check for:
 1. Secrets in code: Search for hardcoded API keys, passwords, tokens, private keys, connection strings
 2. Authentication & authorization: Look for auth patterns, session management, access controls
 3. Encryption: Check for TLS/SSL configs, crypto library usage, encryption at rest
@@ -70,29 +61,13 @@ Check for:
 5. Branch protection: Check if the default branch has protection rules, required reviews, status checks
 6. CI/CD security: Review GitHub Actions workflows for secret handling, pinned actions, permissions
 
-For each finding, include the specific SOC2 section reference (e.g. "CC6.1", "CC7.2") from the reference below.
-
-## SOC2 Reference
-${loadSOC2Reference("security.md")}
-
-Use owner="${owner}" and repo="${repo}" for all tool calls.
-${methodology(hasContext)}
-Return findings with severity levels and actionable recommendations.`,
-    tools: [listRepoFiles, readFile, searchCode, getRepoSettings, listWorkflows, listDependencies],
-    outputSchema: AgentFindingsSchema,
-    model,
-    maxIterations: maxIter(hasContext),
-  });
-}
-
-export function createAvailabilityAgent({ owner, repo, localPath, repoContext }: AgentOptions) {
-  const { listRepoFiles, readFile, searchCode, listWorkflows } = createTools(owner, repo, localPath);
-  const hasContext = !!repoContext;
-  return new Agent<string, AgentFindings>({
-    name: "AvailabilityAgent",
-    instructions: `You are a SOC2 Availability auditor (Criteria A1). Audit the GitHub repository for availability compliance.
-
-Check for:
+For each finding, include the specific SOC2 section reference (e.g. "CC6.1", "CC7.2") from the reference below.`,
+    soc2File: "security.md",
+    toolKeys: ["listRepoFiles", "readFile", "searchCode", "getRepoSettings", "listWorkflows", "listDependencies"],
+  },
+  {
+    name: "Availability",
+    checklist: `Check for:
 1. Health check endpoints: Look for health/readiness/liveness probe implementations
 2. Redundancy & scaling: Check for K8s configs (replicas, HPA), load balancer configs, auto-scaling
 3. Backup configurations: Look for database backup scripts, retention policies, snapshot configs
@@ -100,29 +75,13 @@ Check for:
 5. Disaster recovery: Look for DR documentation, runbooks, failover configs
 6. CI/CD & deployment: Check for deployment pipelines, rollback strategies, blue-green/canary configs
 
-For each finding, include the specific SOC2 section reference (e.g. "A1.1", "A1.2") from the reference below.
-
-## SOC2 Reference
-${loadSOC2Reference("availability.md")}
-
-Use owner="${owner}" and repo="${repo}" for all tool calls.
-${methodology(hasContext)}
-Return findings with severity levels and actionable recommendations.`,
-    tools: [listRepoFiles, readFile, searchCode, listWorkflows],
-    outputSchema: AgentFindingsSchema,
-    model,
-    maxIterations: maxIter(hasContext),
-  });
-}
-
-export function createProcessingIntegrityAgent({ owner, repo, localPath, repoContext }: AgentOptions) {
-  const { listRepoFiles, readFile, searchCode, listWorkflows } = createTools(owner, repo, localPath);
-  const hasContext = !!repoContext;
-  return new Agent<string, AgentFindings>({
-    name: "ProcessingIntegrityAgent",
-    instructions: `You are a SOC2 Processing Integrity auditor (Criteria PI1). Audit the GitHub repository for processing integrity compliance.
-
-Check for:
+For each finding, include the specific SOC2 section reference (e.g. "A1.1", "A1.2") from the reference below.`,
+    soc2File: "availability.md",
+    toolKeys: ["listRepoFiles", "readFile", "searchCode", "listWorkflows"],
+  },
+  {
+    name: "ProcessingIntegrity",
+    checklist: `Check for:
 1. Input validation: Look for validation patterns, sanitization, schema validation (Zod, Joi, marshmallow, etc.)
 2. Error handling: Check for proper error handling patterns, try/catch blocks, error logging
 3. Data integrity: Look for checksums, data validation, schema migrations, type checking
@@ -130,29 +89,13 @@ Check for:
 5. Test coverage: Review test files, CI test steps, coverage configs
 6. Quality gates: Check for linting, type checking, code review requirements in CI
 
-For each finding, include the specific SOC2 section reference (e.g. "PI1.2", "PI1.3") from the reference below.
-
-## SOC2 Reference
-${loadSOC2Reference("processing-integrity.md")}
-
-Use owner="${owner}" and repo="${repo}" for all tool calls.
-${methodology(hasContext)}
-Return findings with severity levels and actionable recommendations.`,
-    tools: [listRepoFiles, readFile, searchCode, listWorkflows],
-    outputSchema: AgentFindingsSchema,
-    model,
-    maxIterations: maxIter(hasContext),
-  });
-}
-
-export function createConfidentialityAgent({ owner, repo, localPath, repoContext }: AgentOptions) {
-  const { listRepoFiles, readFile, searchCode, getRepoSettings } = createTools(owner, repo, localPath);
-  const hasContext = !!repoContext;
-  return new Agent<string, AgentFindings>({
-    name: "ConfidentialityAgent",
-    instructions: `You are a SOC2 Confidentiality auditor (Criteria C1). Audit the GitHub repository for confidentiality compliance.
-
-Check for:
+For each finding, include the specific SOC2 section reference (e.g. "PI1.2", "PI1.3") from the reference below.`,
+    soc2File: "processing-integrity.md",
+    toolKeys: ["listRepoFiles", "readFile", "searchCode", "listWorkflows"],
+  },
+  {
+    name: "Confidentiality",
+    checklist: `Check for:
 1. Encryption at rest: Look for database encryption configs, encrypted storage, KMS usage
 2. Encryption in transit: Check for TLS/SSL configs, HTTPS enforcement, certificate management
 3. Access controls: Look for RBAC implementations, least-privilege patterns, API key scoping
@@ -160,29 +103,13 @@ Check for:
 5. Data classification: Look for data classification markers, sensitivity labels in code or docs
 6. Repo visibility: Check if the repo is public/private, if sensitive data could be exposed
 
-For each finding, include the specific SOC2 section reference (e.g. "C1.1", "C1.2") from the reference below.
-
-## SOC2 Reference
-${loadSOC2Reference("confidentiality.md")}
-
-Use owner="${owner}" and repo="${repo}" for all tool calls.
-${methodology(hasContext)}
-Return findings with severity levels and actionable recommendations.`,
-    tools: [listRepoFiles, readFile, searchCode, getRepoSettings],
-    outputSchema: AgentFindingsSchema,
-    model,
-    maxIterations: maxIter(hasContext),
-  });
-}
-
-export function createPrivacyAgent({ owner, repo, localPath, repoContext }: AgentOptions) {
-  const { listRepoFiles, readFile, searchCode } = createTools(owner, repo, localPath);
-  const hasContext = !!repoContext;
-  return new Agent<string, AgentFindings>({
-    name: "PrivacyAgent",
-    instructions: `You are a SOC2 Privacy auditor (Criteria P1-P8). Audit the GitHub repository for privacy compliance.
-
-Check for:
+For each finding, include the specific SOC2 section reference (e.g. "C1.1", "C1.2") from the reference below.`,
+    soc2File: "confidentiality.md",
+    toolKeys: ["listRepoFiles", "readFile", "searchCode", "getRepoSettings"],
+  },
+  {
+    name: "Privacy",
+    checklist: `Check for:
 1. PII handling: Search for patterns handling email, SSN, phone, address, date of birth, names
 2. Consent mechanisms: Look for consent flows, opt-in/opt-out implementations, cookie banners
 3. Data retention: Check for data retention policies, TTL configs, deletion/purge logic
@@ -190,17 +117,57 @@ Check for:
 5. PII in logs: Check logging configurations for PII masking/redaction
 6. Data minimization: Look for patterns of collecting only necessary data
 
-For each finding, include the specific SOC2 section reference (e.g. "P1.1", "P4.3", "P8.1") from the reference below.
+For each finding, include the specific SOC2 section reference (e.g. "P1.1", "P4.3", "P8.1") from the reference below.`,
+    soc2File: "privacy.md",
+    toolKeys: ["listRepoFiles", "readFile", "searchCode"],
+  },
+];
+
+function createAgentFromConfig(config: AgentConfig, { owner, repo, localPath, repoContext }: AgentOptions): Agent<string, AgentFindings> {
+  const hasContext = !!repoContext;
+  const allTools = createTools(owner, repo, localPath);
+  const criteriaLabel = config.name.replace(/([a-z])([A-Z])/g, "$1 $2");
+
+  if (hasContext) {
+    return new Agent<string, AgentFindings>({
+      name: `${config.name}Analyzer`,
+      instructions: `You are a SOC2 ${criteriaLabel} auditor. Analyze the repository code provided in the prompt.
+
+${config.checklist}
 
 ## SOC2 Reference
-${loadSOC2Reference("privacy.md")}
+${loadSOC2Reference(config.soc2File)}
+
+${CONTEXT_METHODOLOGY}
+Return findings with severity levels and actionable recommendations.`,
+      tools: [],
+      outputSchema: AgentFindingsSchema,
+      model,
+      maxIterations: 1,
+    });
+  }
+
+  return new Agent<string, AgentFindings>({
+    name: `${config.name}Agent`,
+    instructions: `You are a SOC2 ${criteriaLabel} auditor. Audit the GitHub repository for compliance.
+
+${config.checklist}
+
+## SOC2 Reference
+${loadSOC2Reference(config.soc2File)}
 
 Use owner="${owner}" and repo="${repo}" for all tool calls.
-${methodology(hasContext)}
+${AGENT_METHODOLOGY}
 Return findings with severity levels and actionable recommendations.`,
-    tools: [listRepoFiles, readFile, searchCode],
+    tools: config.toolKeys.map((k) => allTools[k]),
     outputSchema: AgentFindingsSchema,
     model,
-    maxIterations: maxIter(hasContext),
+    maxIterations: 30,
   });
 }
+
+export function createSecurityAgent(opts: AgentOptions) { return createAgentFromConfig(AGENT_CONFIGS[0], opts); }
+export function createAvailabilityAgent(opts: AgentOptions) { return createAgentFromConfig(AGENT_CONFIGS[1], opts); }
+export function createProcessingIntegrityAgent(opts: AgentOptions) { return createAgentFromConfig(AGENT_CONFIGS[2], opts); }
+export function createConfidentialityAgent(opts: AgentOptions) { return createAgentFromConfig(AGENT_CONFIGS[3], opts); }
+export function createPrivacyAgent(opts: AgentOptions) { return createAgentFromConfig(AGENT_CONFIGS[4], opts); }
