@@ -1,5 +1,5 @@
 name: "SOC2 Compliance Audit"
-description: "Run a SOC2 compliance audit on the current GitHub repository using AI agents. Checks branch protection, CI/CD, secrets management, access controls, and more."
+description: "AI-powered SOC2 compliance audit using agents that check your repo against Trust Service Criteria."
 
 branding:
   icon: shield
