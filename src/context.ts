@@ -1,6 +1,5 @@
-import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, extname, relative } from "node:path";
-import { spawnSync } from "node:child_process";
 
 const SKIP_DIRS = new Set([
   "node_modules", ".git", "dist", "build", ".next", "__pycache__",
@@ -19,25 +18,28 @@ const SKIP_EXTENSIONS = new Set([
   ".map",
 ]);
 
-const MAX_FILE_SIZE = 100_000; // 100KB per file
-const MAX_TOTAL_SIZE = 800_000; // ~800KB total context (~200k tokens)
+const MAX_CHUNK_SIZE = 800_000; // ~800KB per chunk (~200k tokens)
 
-interface RepoContext {
-  tree: string;
-  files: { path: string; content: string }[];
-  repoSettings: string;
+export interface RepoFile {
+  path: string;
+  content: string;
+  size: number;
+}
+
+export interface ContextChunk {
+  label: string;
+  files: RepoFile[];
   totalSize: number;
-  truncated: boolean;
+  formatted: string;
 }
 
 function shouldSkipFile(name: string, ext: string): boolean {
-  if (name.startsWith(".") && name !== ".github") return false; // allow dotfiles except .github
   if (SKIP_EXTENSIONS.has(ext)) return true;
   if (name.endsWith(".min.js") || name.endsWith(".min.css")) return true;
   return false;
 }
 
-function walkDir(dir: string, root: string, files: { path: string; size: number }[]): void {
+function walkDir(dir: string, root: string, files: RepoFile[]): void {
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });
@@ -54,14 +56,91 @@ function walkDir(dir: string, root: string, files: { path: string; size: number 
       if (shouldSkipFile(entry.name, ext)) continue;
       try {
         const stat = statSync(fullPath);
-        if (stat.size > 0 && stat.size <= MAX_FILE_SIZE) {
-          files.push({ path: relative(root, fullPath), size: stat.size });
+        if (stat.size > 0) {
+          const content = readFileSync(fullPath, "utf-8");
+          const relPath = relative(root, fullPath);
+          files.push({ path: relPath, content, size: stat.size });
         }
       } catch {
         continue;
       }
     }
   }
+}
+
+function totalSize(files: RepoFile[]): number {
+  return files.reduce((sum, f) => sum + f.size, 0);
+}
+
+function topDir(path: string): string {
+  const slash = path.indexOf("/");
+  return slash === -1 ? "" : path.slice(0, slash);
+}
+
+/** Split files into two groups by top-level directory, keeping folders intact. */
+function splitByDir(files: RepoFile[]): [RepoFile[], RepoFile[]] {
+  // Group by top-level directory (root files go under "")
+  const groups = new Map<string, RepoFile[]>();
+  for (const f of files) {
+    const dir = topDir(f.path);
+    const list = groups.get(dir) ?? [];
+    list.push(f);
+    groups.set(dir, list);
+  }
+
+  const dirs = [...groups.keys()];
+
+  // If only one group (all files in same dir or all at root), split the file list in half
+  if (dirs.length <= 1) {
+    const mid = Math.ceil(files.length / 2);
+    return [files.slice(0, mid), files.slice(mid)];
+  }
+
+  // Split directory groups into two halves by cumulative size
+  const half = totalSize(files) / 2;
+  const left: RepoFile[] = [];
+  const right: RepoFile[] = [];
+  let leftSize = 0;
+
+  for (const dir of dirs) {
+    const group = groups.get(dir)!;
+    const groupSize = totalSize(group);
+    if (leftSize + groupSize <= half || left.length === 0) {
+      left.push(...group);
+      leftSize += groupSize;
+    } else {
+      right.push(...group);
+    }
+  }
+
+  // Safety: if one side is empty, force a split
+  if (right.length === 0) {
+    const mid = Math.ceil(left.length / 2);
+    return [left.slice(0, mid), left.slice(mid)];
+  }
+
+  return [left, right];
+}
+
+function formatChunk(files: RepoFile[]): string {
+  const sections: string[] = [];
+
+  sections.push("## File Tree\n");
+  sections.push("```");
+  sections.push(buildTree(files.map((f) => f.path)));
+  sections.push("```");
+  sections.push("");
+
+  sections.push("## File Contents\n");
+  for (const f of files) {
+    sections.push(`### ${f.path}\n`);
+    sections.push("```");
+    sections.push(f.content);
+    sections.push("```");
+    sections.push("");
+  }
+
+  return sections.join("\n");
 }
 
 function buildTree(filePaths: string[]): string {
@@ -83,103 +162,65 @@ function buildTree(filePaths: string[]): string {
   return lines.join("\n");
 }
 
-function fetchRepoSettings(owner: string, repo: string): string {
-  const gh = (args: string[]): string => {
-    const result = spawnSync("gh", ["api", ...args], { encoding: "utf8", timeout: 30_000 });
-    if (result.error || result.status !== 0) return "";
-    return result.stdout.trim();
-  };
+/** Split a single large file into multiple chunks by lines. */
+function splitLargeFile(file: RepoFile, label: string): ContextChunk[] {
+  const lines = file.content.split("\n");
+  const chunks: ContextChunk[] = [];
+  let start = 0;
+  let part = 1;
 
-  const lines: string[] = [];
-
-  const repoRaw = gh([`/repos/${owner}/${repo}`]);
-  if (repoRaw) {
-    try {
-      const data = JSON.parse(repoRaw);
-      lines.push(`Visibility: ${data.visibility ?? "unknown"}`);
-      lines.push(`Default branch: ${data.default_branch ?? "unknown"}`);
-      lines.push(`Has issues: ${data.has_issues ?? false}`);
-      lines.push(`Has wiki: ${data.has_wiki ?? false}`);
-
-      const branch = data.default_branch ?? "main";
-      const bpRaw = gh([`/repos/${owner}/${repo}/branches/${branch}/protection`]);
-      if (bpRaw) {
-        try {
-          const bp = JSON.parse(bpRaw);
-          lines.push("Branch protection: enabled");
-          lines.push(`  Required reviews: ${bp.required_pull_request_reviews != null}`);
-          lines.push(`  Required status checks: ${bp.required_status_checks != null}`);
-          lines.push(`  Enforce admins: ${bp.enforce_admins?.enabled ?? false}`);
-        } catch {
-          lines.push("Branch protection: error parsing response");
-        }
-      } else {
-        lines.push("Branch protection: not configured");
-      }
-    } catch {
-      lines.push("Repository settings: error parsing response");
+  while (start < lines.length) {
+    let end = start;
+    let size = 0;
+    while (end < lines.length && size + lines[end].length + 1 <= MAX_CHUNK_SIZE) {
+      size += lines[end].length + 1;
+      end++;
     }
+    if (end === start) end = start + 1; // at least one line
+
+    const slice = lines.slice(start, end).join("\n");
+    const partFile: RepoFile = {
+      path: `${file.path} (lines ${start + 1}-${end})`,
+      content: slice,
+      size: slice.length,
+    };
+    chunks.push({
+      label: `${label} part ${part}`,
+      files: [partFile],
+      totalSize: slice.length,
+      formatted: formatChunk([partFile]),
+    });
+    start = end;
+    part++;
   }
 
-  return lines.join("\n");
+  return chunks;
 }
 
-export function loadRepoContext(owner: string, repo: string, localPath: string): RepoContext {
-  const allFiles: { path: string; size: number }[] = [];
+/** Recursively split files into chunks that fit within MAX_CHUNK_SIZE. */
+function splitIntoChunks(files: RepoFile[], label: string): ContextChunk[] {
+  const size = totalSize(files);
+  if (size <= MAX_CHUNK_SIZE) {
+    return [{ label, files, totalSize: size, formatted: formatChunk(files) }];
+  }
+
+  // Single file that's too large — split by lines
+  if (files.length === 1) {
+    return splitLargeFile(files[0], label);
+  }
+
+  const [left, right] = splitByDir(files);
+  return [
+    ...splitIntoChunks(left, `${label} (part 1)`),
+    ...splitIntoChunks(right, `${label} (part 2)`),
+  ];
+}
+
+export function loadRepoChunks(localPath: string): ContextChunk[] {
+  const allFiles: RepoFile[] = [];
   walkDir(localPath, localPath, allFiles);
 
-  // Sort by size ascending so we fit more files
-  allFiles.sort((a, b) => a.size - b.size);
+  console.log(`  Loaded ${allFiles.length} files, ${Math.round(totalSize(allFiles) / 1024)}KB total`);
 
-  const files: { path: string; content: string }[] = [];
-  let totalSize = 0;
-  let truncated = false;
-
-  for (const f of allFiles) {
-    if (totalSize + f.size > MAX_TOTAL_SIZE) {
-      truncated = true;
-      continue;
-    }
-    try {
-      const content = readFileSync(join(localPath, f.path), "utf-8");
-      files.push({ path: f.path, content });
-      totalSize += f.size;
-    } catch {
-      continue;
-    }
-  }
-
-  const tree = buildTree(allFiles.map((f) => f.path));
-  const repoSettings = fetchRepoSettings(owner, repo);
-
-  return { tree, files, repoSettings, totalSize, truncated };
-}
-
-export function formatContext(ctx: RepoContext): string {
-  const sections: string[] = [];
-
-  sections.push("## Repository Settings\n");
-  sections.push(ctx.repoSettings || "(unable to fetch)");
-  sections.push("");
-
-  sections.push("## File Tree\n");
-  sections.push("```");
-  sections.push(ctx.tree);
-  sections.push("```");
-  sections.push("");
-
-  if (ctx.truncated) {
-    sections.push(`> Note: Repository exceeds context limit. ${ctx.files.length} files included (${Math.round(ctx.totalSize / 1024)}KB). Some larger files were omitted.\n`);
-  }
-
-  sections.push("## File Contents\n");
-  for (const f of ctx.files) {
-    sections.push(`### ${f.path}\n`);
-    sections.push("```");
-    sections.push(f.content);
-    sections.push("```");
-    sections.push("");
-  }
-
-  return sections.join("\n");
+  return splitIntoChunks(allFiles, "repo");
 }

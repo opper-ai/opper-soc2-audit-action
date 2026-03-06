@@ -9,7 +9,7 @@ import {
   createConfidentialityAgent,
   createPrivacyAgent,
 } from "./agents.ts";
-import { loadRepoContext, formatContext } from "./context.ts";
+import { loadRepoChunks, type ContextChunk } from "./context.ts";
 
 interface AgentDef {
   factory: (opts: { owner: string; repo: string; localPath: string; repoContext?: string }) => Agent<string, AgentFindings>;
@@ -33,7 +33,7 @@ async function runOne(
   parentSpanId: string,
   repoContext?: string,
 ): Promise<AgentFindings> {
-  console.log(`  [${owner}/${repo}] Starting ${def.name} audit (${mode})...`);
+  console.log(`  [${owner}/${repo}] Starting ${def.name} (${mode})...`);
 
   const agent = def.factory({ owner, repo, localPath, repoContext });
 
@@ -61,24 +61,29 @@ async function runOne(
   }
 }
 
-/** Deduplicate findings by title+file_path, keeping the higher severity. */
-function mergeFindings(a: AgentFindings, b: AgentFindings): AgentFindings {
-  const SEVERITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
-  const seen = new Map<string, Finding>();
+const SEVERITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
 
-  for (const f of [...a.findings, ...b.findings]) {
+/** Deduplicate findings by title+file_path, keeping the higher severity. */
+function deduplicateFindings(allFindings: Finding[]): Finding[] {
+  const seen = new Map<string, Finding>();
+  for (const f of allFindings) {
     const key = `${f.title}::${f.file_path ?? ""}`;
     const existing = seen.get(key);
     if (!existing || SEVERITY_RANK[f.severity] < SEVERITY_RANK[existing.severity]) {
       seen.set(key, f);
     }
   }
+  return [...seen.values()];
+}
 
+/** Merge multiple AgentFindings for the same criteria into one. */
+function mergeResults(name: string, results: AgentFindings[]): AgentFindings {
+  const allFindings = results.flatMap((r) => r.findings);
   return {
-    criteria: a.criteria,
-    control_reference: a.control_reference || b.control_reference,
-    summary: [a.summary, b.summary].filter(Boolean).join(" | "),
-    findings: [...seen.values()],
+    criteria: name,
+    control_reference: results.find((r) => r.control_reference !== "N/A")?.control_reference ?? "N/A",
+    summary: results.map((r) => r.summary).filter(Boolean).join(" | "),
+    findings: deduplicateFindings(allFindings),
   };
 }
 
@@ -88,33 +93,52 @@ export async function runAudit(owner: string, repo: string): Promise<AgentFindin
   const client = createOpperClient(process.env.OPPER_API_KEY);
   const span = await client.createSpan({ name: `soc2-audit/${owner}/${repo}` });
 
-  // Load full repo context for the full-context pass
-  console.log(`\nLoading full repository context for ${owner}/${repo}...`);
-  const ctx = loadRepoContext(owner, repo, localPath);
-  const repoContext = formatContext(ctx);
-  console.log(`  Context: ${ctx.files.length} files, ${Math.round(ctx.totalSize / 1024)}KB${ctx.truncated ? " (truncated)" : ""}`);
+  // Load and split repo into context chunks
+  console.log(`\nLoading repository ${owner}/${repo}...`);
+  const chunks = loadRepoChunks(localPath);
+  console.log(`  Split into ${chunks.length} chunk(s)`);
+  for (const chunk of chunks) {
+    console.log(`    ${chunk.label}: ${chunk.files.length} files, ${Math.round(chunk.totalSize / 1024)}KB`);
+  }
 
-  console.log(`\nAuditing ${owner}/${repo} — running ${AGENTS.length} agents × 2 modes in parallel...`);
+  // For each criteria: run deep agent + one context analyzer per chunk, all in parallel
+  const allPromises: { criteria: string; promise: Promise<AgentFindings> }[] = [];
 
-  // Run both modes for all agents in parallel
-  const allPromises = AGENTS.flatMap((def) => [
-    runOne(def, "deep", owner, repo, localPath, span.id, undefined),
-    runOne(def, "context", owner, repo, localPath, span.id, repoContext),
-  ]);
+  for (const def of AGENTS) {
+    // Deep research agent (tools, no context)
+    allPromises.push({
+      criteria: def.name,
+      promise: runOne(def, "deep", owner, repo, localPath, span.id),
+    });
 
-  const allResults = await Promise.all(allPromises);
+    // Context analyzer per chunk (no tools, full code)
+    for (const chunk of chunks) {
+      allPromises.push({
+        criteria: def.name,
+        promise: runOne(def, `context/${chunk.label}`, owner, repo, localPath, span.id, chunk.formatted),
+      });
+    }
+  }
 
-  // Merge findings from both modes per criteria
-  const merged: AgentFindings[] = AGENTS.map((def, i) => {
-    const deep = allResults[i * 2];
-    const context = allResults[i * 2 + 1];
-    const result = mergeFindings(deep, context);
-    console.log(`  [${owner}/${repo}] ${def.name}: ${deep.findings.length} (deep) + ${context.findings.length} (context) → ${result.findings.length} merged`);
+  console.log(`\nRunning ${allPromises.length} agents in parallel (${AGENTS.length} deep + ${AGENTS.length} × ${chunks.length} context)...`);
+
+  const allResults = await Promise.all(allPromises.map((p) => p.promise));
+
+  // Group results by criteria and merge
+  const merged: AgentFindings[] = AGENTS.map((def) => {
+    const indices = allPromises
+      .map((p, i) => (p.criteria === def.name ? i : -1))
+      .filter((i) => i !== -1);
+    const results = indices.map((i) => allResults[i]);
+    const result = mergeResults(def.name, results);
+    const deepCount = results[0].findings.length;
+    const contextCount = results.slice(1).reduce((sum, r) => sum + r.findings.length, 0);
+    console.log(`  ${def.name}: ${deepCount} (deep) + ${contextCount} (context) → ${result.findings.length} merged`);
     return result;
   });
 
   const totalFindings = merged.flatMap((r) => r.findings).length;
-  await client.updateSpan(span.id, { repo: `${owner}/${repo}`, mode: "dual", findings: totalFindings });
+  await client.updateSpan(span.id, { repo: `${owner}/${repo}`, chunks: chunks.length, findings: totalFindings });
 
   return merged;
 }
