@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.3](https://github.com/opper-ai/opper-soc2-audit-action/compare/v1.0.2...v1.0.3) (2026-03-09)
+
+
+### Bug Fixes
+
+* remove audit step from CI, only run typecheck and tests ([8c05eee](https://github.com/opper-ai/opper-soc2-audit-action/commit/8c05eee9b72a582ebc3309383bb2b257509f734d))
+* use sh-compatible glob for test command on Node 20 ([3e84230](https://github.com/opper-ai/opper-soc2-audit-action/commit/3e84230a9366e16ba7ec31f8355e6d19c2dd35c8))
+
 ## [1.0.2](https://github.com/opper-ai/opper-soc2-audit-action/compare/v1.0.1...v1.0.2) (2026-03-09)
 
 
