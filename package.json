@@ -1,6 +1,6 @@
 {
   "name": "opper-soc2-audit",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "SOC2 compliance checker agent for GitHub repositories",
   "type": "module",
   "engines": {

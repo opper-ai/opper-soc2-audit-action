@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.4](https://github.com/opper-ai/opper-soc2-audit-action/compare/v1.0.3...v1.0.4) (2026-03-09)
+
+
+### Bug Fixes
+
+* escape backslashes in markdown table cell sanitization ([b3c7ef6](https://github.com/opper-ai/opper-soc2-audit-action/commit/b3c7ef6f4d152cf163cba483ac1e2a26e3c3a84f))
+
 ## [1.0.3](https://github.com/opper-ai/opper-soc2-audit-action/compare/v1.0.2...v1.0.3) (2026-03-09)
 
 
